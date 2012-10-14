@@ -1,0 +1,77 @@
+#
+# Makefile for colorwheel.gadget and gradientslider.gadget by Tomasz Muszynski
+#
+
+all: colorwheel.gadget gradientslider.gadget install
+
+colorwheel.gadget: colorwheel.o triangle.o convert.o
+  slink <WITH <
+LIBPREFIX _
+LIBFD colorwheel.fd
+TO colorwheel.gadget
+FROM lib:libent.o lib:libinit.o colorwheel.o triangle.o convert.o
+LIB lib:scm881.lib lib:sc.lib lib:amiga.lib
+NOICONS
+SC
+ND
+LIBVERSION 43 LIBREVISION 2
+<
+
+gradientslider.gadget: gradientslider.o
+  slink <WITH <
+LIBPREFIX _
+LIBFD gradientslider.fd
+TO gradientslider.gadget
+FROM lib:libent.o lib:libinit.o gradientslider.o
+LIB lib:scm881.lib lib:sc.lib lib:amiga.lib
+NOICONS
+SC
+ND
+LIBVERSION 43 LIBREVISION 1
+<
+
+###########################
+# Dependences
+
+colorwheel.o: colorwheel.c colorwheel.gadget_rev.h cw.h
+  sc colorwheel.c
+triangle.o: triangle.c cw.h
+  sc triangle.c
+convert.o: convert.c cw.h
+  sc convert.c
+
+gradientslider.o: gradientslider.c gradientslider.gadget_rev.h
+  sc gradientslider.c
+
+###########################
+# Other
+
+# Bump version
+bumprev_colorwheel:
+  @-bumprev 43 colorwheel.gadget_rev
+bumprev_gradientslider:
+  @-bumprev 43 gradientslider.gadget_rev
+
+# Make pragma
+pragma: colorwheel.fd gradientslider.fd
+  @-fd2pragma colorwheel.fd Include:pragmas/colorwheel_pragmas.h
+  @-fd2pragma gradientslider.fd Include:pragmas/gradientslider_pragmas.h
+
+# Install it
+install:
+  @-copy colorwheel.gadget SYS:Classes/Gadgets
+  @-copy gradientslider.gadget SYS:Classes/Gadgets
+  @-avail FLUSH
+
+# Run it
+run:
+  @-$(PROGRAMNAME)
+
+# debug it
+cpr:
+  @-cpr -screen $(PUBSCREEN) $(PROGRAMNAME)
+
+#open ProjectMan
+edit:
+  @-ProjectMan
+  @-ed colorwheel.c

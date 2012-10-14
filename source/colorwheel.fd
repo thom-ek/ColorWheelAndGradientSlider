@@ -1,0 +1,5 @@
+##base _ColorWheelBase
+##bias 30
+ConvertHSBToRGB(hsb,rgb)(a0,a1)
+ConvertRGBToHSB(rgb,hsb)(a0,a1)
+##end

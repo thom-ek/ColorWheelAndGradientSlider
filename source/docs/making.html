@@ -1,0 +1,723 @@
+<html>
+<head>
+<title>BOOPSI IRC - Making BOOPSI classes</title>
+</head>
+<body background="images/Space.gif" bgcolor="#000000" text="#ffffff" link="#ff0000">
+<h1>Making your own class</h1>
+<p>
+When making your own classes I advise you to use the
+<a href="src_archives/skel.lha">Skeleton class</a> and then proceed from there since
+it already has a lot of the dirty work finished for you so you can get right to writing
+the guts of your class.
+<h2>A Button Class</h2>
+I figure the best way to go about this is to just take you through the code
+of a button class... Any bugs found while writing this are left as an exercise
+for the reader :)
+<h3>Header File</h3>
+
+<pre>
+<font color="#4699CD">#ifndef</font> BBBUTTONCLASS_H
+<font color="#4699CD">#define</font> BBBUTTONCLASS_H
+
+<font color="#4699CD">#define</font> BGA_Dummy (TAG_USER + 0x60000)
+<font color="#4699CD">#define</font> BGA_Push (BGA_Dummy + 1)
+<font color="#4699CD">#define</font> BGA_Image (BGA_Dummy + 2)
+
+<font color="#00FF00">//Convenient macro for creating buttons</font>
+<font color="#4699CD">#define</font> ButtonObject NewObject( NULL, <font color="#F31A69">"bbbuttongadget"</font>
+
+#endif
+</pre>
+<h3>Casting Macros</h3>
+I like to use casting macros a lot so here are some:
+
+<pre>
+<font color="#4699CD">#define</font> GA(o) ((<font color="#4699CD">struct</font> Gadget *)o)
+<font color="#4699CD">#define</font> IA(o) ((<font color="#4699CD">struct</font> Image *)o)
+<font color="#4699CD">#define</font> IM(o) ((<font color="#4699CD">struct</font> Image *)o)
+<font color="#4699CD">#define</font> SET(o) ((<font color="#4699CD">struct</font> opSet *)o)
+<font color="#4699CD">#define</font> GET(o) ((<font color="#4699CD">struct</font> opGet *)o)
+<font color="#4699CD">#define</font> GPR(o) ((<font color="#4699CD">struct</font> gpRender *)o)
+<font color="#4699CD">#define</font> GPI(o) ((<font color="#4699CD">struct</font> gpInput *)o)
+<font color="#4699CD">#define</font> GPL(o) ((<font color="#4699CD">struct</font> gpLayout *)o)
+</pre>
+They just provide a simple and quick way to cast BOOPSI style messages from Msg to
+the appropriate structure for that message
+<h3>Flags</h3>
+Just about every class needs some flags associated with it to encode options or
+states.
+
+<pre>
+<font color="#4699CD">#define</font> BB_TEXT 0 <font color="#00FF00">//is the label text?</font>
+<font color="#4699CD">#define</font> BB_PUSH 1 <font color="#00FF00">//should the button hold its state when (de)selected</font>
+
+<font color="#4699CD">#define</font> BF_TEXT (1L &lt;&lt; BB_TEXT)
+<font color="#4699CD">#define</font> BF_PUSH (1L &lt;&lt; BB_PUSH)
+</pre>
+<h3>Protos</h3>
+Instead of just packing every bit of code into dispatcher its a good idea to break
+it up into separate functions.
+
+<pre>
+<font color="#00FF00">//always good for debugging, since you can't use printf() from a library or even a class i think...</font>
+extern int kprintf( const char *str, ... );
+
+<font color="#00FF00">//the dispatcher itself</font>
+ULONG
+ASM dispatchClass( REG(a0) Class * cl, REG(a2) Object * o, REG(a1) Msg msg );
+
+<font color="#00FF00">//Used to set our attributes</font>
+ULONG
+ASM setClassAttrs( REG(a0) Class * cl, REG(a2) Object * o, REG(a1) <font color="#4699CD">struct</font> opSet * msg );
+
+<font color="#00FF00">//Used to get some attribute</font>
+ULONG
+ASM getClassAttr( REG(a0) Class *cl, REG(a2) Object *o, REG(a1) <font color="#4699CD">struct</font> opGet * msg);
+
+<font color="#00FF00">//a custom TextLength() that doesn't need a RastPort</font>
+LONG myTextLength( <font color="#4699CD">struct</font> TextFont *font, char *str, int len );
+
+<font color="#00FF00">//The ubiquitous Notify() function found in all my gadget classes</font>
+<font color="#00FF00">//It takes care of sending the OM_UPDATE messages to the target object</font>
+void ASM Notify( REG(a0) Class *cl, REG(a2) Object *o, REG(a1) <font color="#4699CD">struct</font> opSet *msg, REG(d1) ULONG flags, REG(d2) sel, REG(a3) <font color="#4699CD">struct</font> GadgetInfo *ginfo );
+</pre>
+<h3>Globals</h3>
+
+<pre>
+Class *cl = 0;  <font color="#00FF00">// our class structure pointer</font>
+<font color="#4699CD">struct</font> Library *ClasservBase;  <font color="#00FF00">//pointer to the classerv.library base, see the my classes page</font>
+
+<font color="#4699CD">struct</font> DrawInfo defdri;  <font color="#00FF00">//a default drawinfo in case one isn't passed in</font>
+<font color="#00FF00">//we use it to find a height and width of buttons with text labels so we really need it</font>
+
+WORD defpens[NUMDRIPENS];  <font color="#00FF00">//default pen array for the drawinfo</font>
+
+<font color="#00FF00">//in case we're disabled we should ghost</font>
+USHORT ghostdata[] =
+{
+	0x2222, 0x8888
+};
+
+<font color="#00FF00">//our instance data, try to make it small</font>
+<font color="#4699CD">struct</font> localObjData {
+	<font color="#4699CD">struct</font> DrawInfo *dri;
+	BYTE flags;
+};
+
+<font color="#00FF00">//ahhh, easy open and closing of libs</font>
+<font color="#4699CD">struct</font> OpenLibTemplate olt[] =
+{
+	{<font color="#F31A69">"intuition.library"</font>,36,&amp;IntuitionBase},
+	{<font color="#F31A69">"graphics.library"</font>,0,&amp;GfxBase},
+	{<font color="#F31A69">"utility.library"</font>,0,&amp;UtilityBase},
+	{<font color="#F31A69">"classerv.library"</font>,0,&amp;ClasservBase},
+	{0}
+};
+
+<font color="#00FF00">//same for classes although we don't need any here</font>
+<font color="#4699CD">struct</font> OpenClassTemplate oct[] =
+{
+	{0}
+};
+</pre>
+<h3>Names</h3>
+We need to pick a name for our gadget and for our superclass. As naming conventions
+go there really isn't a standard yet. Once the classerv.library is brought to its
+full potential there should be one.
+
+<pre>
+<font color="#4699CD">#define</font> MYCLASSID <font color="#F31A69">"bbbuttongadget"</font>
+<font color="#4699CD">#define</font> SUPERCLASSID <font color="#F31A69">"gadgetclass"</font>
+</pre>
+<h3>OpenLibrary/CloseLibrary</h3>
+I do all of my classes so that they are in libraries, you don't have to though, you
+can make private classes and public classes in your own code. I just like being
+able to have them shareable and easily replaced.
+
+<pre>
+int ASM SAVEDS __UserLibInit( REG(a6) <font color="#4699CD">struct</font> MyLibrary *libbase )
+{
+	<font color="#00FF00">//Open libraries and classes</font>
+	<font color="#4699CD">if</font>( OpenLibraries( olt ) )
+	{
+		<font color="#4699CD">if</font>( OpenClasses( oct ) )
+		{
+			<font color="#00FF00">//setup our default drawinfo</font>
+			defpens[BACKGROUNDPEN] = 0;
+			defpens[SHADOWPEN] = 1;
+			defpens[SHINEPEN] = 2;
+			defpens[TEXTPEN] = 1;
+			defdri.dri_Pens = defpens;
+			defdri.dri_NumPens = NUMDRIPENS;
+			defdri.dri_Font = GfxBase-&gt;DefaultFont;
+			<font color="#00FF00">//setup our class</font>
+			<font color="#4699CD">if</font>( cl = MakeClass( MYCLASSID,
+ 	                     SUPERCLASSID, NULL,
+   	                   sizeof(<font color="#4699CD">struct</font> localObjData), 0))
+			{
+				<font color="#00FF00">/* Fill in the callback hook */</font>
+				cl-&gt;cl_Dispatcher.h_Entry = (ULONG (*) ())dispatchClass;
+				<font color="#00FF00">/* Keep track of the libbase here since we'll need it later */</font>
+				cl-&gt;cl_UserData = (ULONG)libbase;
+				<font color="#00FF00">/* Make the class public */</font>
+				AddClass( cl );
+				<font color="#4699CD">return</font>( FALSE );
+			}
+			<font color="#00FF00">/* something is hosed, close the classes and libs */</font>
+		}
+		CloseClasses( oct );
+	}
+	CloseLibraries( olt );
+	<font color="#4699CD">return</font>( TRUE );
+}
+
+void ASM SAVEDS __UserLibCleanup( REG(a6) <font color="#4699CD">struct</font> MyLibrary *libbase )
+{
+	<font color="#4699CD">if</font>( cl )
+	{
+		<font color="#00FF00">/* Remove and free our class structure */</font>
+		RemoveClass( cl );
+		FreeClass(cl);
+	}
+	<font color="#00FF00">/* Close libs and classes, see how easy it is :) */</font>
+	CloseClasses( oct );
+	CloseLibraries( olt );
+}
+</pre>
+<h3>Dispatcher... Ugh</h3>
+Here comes the hard part... Notice no __saveds, it can't be used here...
+
+<pre>
+ULONG ASM dispatchClass( REG(a0) Class *cl, REG(a2) Object *o, REG(a1) Msg msg)
+{
+	ULONG retval = FALSE;
+	Object *newobj;
+	<font color="#4699CD">struct</font> localObjData *lod;
+</pre>
+C can be a pain when coding shared libraries. Just because this function is in
+a shared library doesn't mean that a6 will be set to our library base so we must
+first put our lib base, which we saved in cl_UserData, into a6 before we can get
+a4 and access to all our global data (library bases, etc...).
+
+<pre>
+	putreg( REG_A6, cl-&gt;cl_UserData );
+	geta4();
+
+	<font color="#4699CD">switch</font> (msg-&gt;MethodID)
+	{
+		<font color="#4699CD">case</font> OM_NEW:       <font color="#00FF00">/* First, pass up to superclass */</font>
+<font color="#4699CD">#ifdef</font> DEBUG
+			kprintf( <font color="#F31A69">"class.class/OM_NEW:\n"</font> );
+<font color="#4699CD">#endif</font>
+			<font color="#4699CD">if</font>(newobj = (Object *)DSM(cl, o, msg))
+			{
+</pre>
+First you pass the message up using DoSuperMethodA(), DSM() for short, and this will
+eventually hit rootclass creating our object and then it will come back down to
+us after our parents have initialized their instance data to the defaults.
+Then below we get our instance data pointer and set any
+defaults. ALWAYS make sure that your instance pointer is set and DO NOT ever copy
+and paste the instance macro from the OM_NEW method since it uses lod = INST_DATA( cl, newobj )
+where every other method should use lod = INST_DATA(cl, o), notice it should be o not newobj.
+NB: You should always pass the message up to your parent class, in the future some people
+might want to implement error handling so that any objects passed in the taglists will be
+disposed of if the OM_NEW fails.
+
+<pre>
+				<font color="#00FF00">/* Initial local instance data */</font>
+				lod = INST_DATA( cl, newobj );
+				lod-&gt;dri = &amp;defdri;
+				<font color="#00FF00">//Use set function to interpret the tags passed in</font>
+				setClassAttrs( cl, newobj, (<font color="#4699CD">struct</font> opSet *)msg );
+				retval = (ULONG)newobj;
+			}
+			<font color="#4699CD">break</font>;
+		<font color="#4699CD">case</font> OM_SET:
+<font color="#4699CD">#ifdef</font> DEBUG
+			kprintf( <font color="#F31A69">"class.class/OM_SET:\n"</font> );
+<font color="#4699CD">#endif</font>
+			retval = DSM( cl, o, msg );
+			retval += setClassAttrs( cl, o, SET(msg) );
+			<font color="#4699CD">break</font>;
+		<font color="#4699CD">case</font> OM_GET:
+<font color="#4699CD">#ifdef</font> DEBUG
+			kprintf( <font color="#F31A69">"class.class/OM_GET:\n"</font> );
+<font color="#4699CD">#endif</font>
+			retval = getClassAttr( cl, o, GET(msg) );
+			<font color="#4699CD">break</font>;
+</pre>
+Here comes GM_RENDER, it does all of the drawing for the gadget whenever intuition
+asks it too. Since this is the first function pertaining to gadget we'll discuss
+the GadgetInfo structure now.
+
+<pre>
+<font color="#4699CD">struct</font> GadgetInfo
+{
+	<font color="#4699CD">struct</font> Screen *gi_Screen;
+	<font color="#4699CD">struct</font> Window *gi_Window;
+	<font color="#4699CD">struct</font> Requester *gi_Requester;
+	
+	<font color="#4699CD">struct</font> RastPort *gi_RastPort;
+	<font color="#4699CD">struct</font> Layer *gi_Layer;
+	
+	<font color="#4699CD">struct</font> IBox gi_Domain;
+	
+	<font color="#4699CD">struct</font> {
+		UBYTE DetailPen;
+		UBYTE BlockPen;
+	} gi_Pens;
+	
+	<font color="#4699CD">struct</font> DrawInfo *gi_DrInfo;
+	
+	ULONG gi_Reserved[4];
+};
+</pre>
+This structure gives you a bunch of information about where your gadget is in the
+system as well as any information needed for drawing. It is available in all gadget
+method messages and the OM_SET message defined by the rootclass. Be warned though,
+all of the gadget methods have the pointer just after the MethodID, but the OM_SET
+message has it in a different place, this has caused me problems before.
+
+<pre>
+		<font color="#4699CD">case</font> GM_RENDER:
+			{
+				<font color="#4699CD">struct</font> RastPort *rp = GPR(msg)-&gt;gpr_RPort;
+				<font color="#4699CD">struct</font> DrawInfo *dri;
+				<font color="#00FF00">//Support for the GREL_ flags, these should be made into macros someday.</font>
+				WORD left = (GA(o)-&gt;Flags &amp; GFLG_RELRIGHT) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Width + GA(o)-&gt;LeftEdge - 1 : GA(o)-&gt;LeftEdge;
+				WORD top = (GA(o)-&gt;Flags &amp; GFLG_RELBOTTOM) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Height + GA(o)-&gt;TopEdge - 1 : GA(o)-&gt;TopEdge;
+				WORD width = (GA(o)-&gt;Flags &amp; GFLG_RELWIDTH) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Width + GA(o)-&gt;Width : GA(o)-&gt;Width;
+				WORD height = (GA(o)-&gt;Flags &amp; GFLG_RELHEIGHT) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Height + GA(o)-&gt;Height : GA(o)-&gt;Height;
+
+				lod = INST_DATA( cl, o );
+
+				dri = lod-&gt;dri;  <font color="#00FF00">//cache a pointer to the drawinfo</font>
+				<font color="#00FF00">//here we check if there is a border image (most likely a frameiclass object) which we should draw else we just setup a background color</font>
+				<font color="#4699CD">if</font>( GA(o)-&gt;GadgetRender )
+				{
+					DrawImageState( rp, GA(o)-&gt;GadgetRender, left, top, (GA(o)-&gt;Flags &amp; GFLG_SELECTED) ? IDS_SELECTED : IDS_NORMAL, GPR(msg)-&gt;gpr_GInfo-&gt;gi_DrInfo );
+					SetDrMd( rp, JAM1 );
+				}
+				<font color="#4699CD">else</font>
+				{
+					SetAPen( rp, (GA(o)-&gt;Flags &amp; GFLG_SELECTED) ? dri-&gt;dri_Pens[FILLPEN] : dri-&gt;dri_Pens[BACKGROUNDPEN] );
+					RectFill( rp, left, top, left + width - 1, top + height - 1 );
+				}
+				<font color="#4699CD">if</font>( GA(o)-&gt;GadgetText )
+				{
+					WORD lwidth, lheight;
+					WORD xoffset, yoffset;
+
+					<font color="#00FF00">//check if we're drawing some text or an image, and figure out the width and height of which one</font>
+					<font color="#4699CD">if</font>( (lod-&gt;flags &amp; BF_TEXT) )
+					{
+						lwidth = myTextLength( dri-&gt;dri_Font, (char *)GA(o)-&gt;GadgetText, strlen( (char *)GA(o)-&gt;GadgetText ) );
+						lheight = dri-&gt;dri_Font-&gt;tf_YSize;
+					}
+					<font color="#4699CD">else</font>
+					{
+						lwidth = IA(GA(o)-&gt;GadgetText)-&gt;Width;
+						lheight = IA(GA(o)-&gt;GadgetText)-&gt;Height;
+					}
+					<font color="#00FF00">//center the text or image inside the gadget</font>
+					xoffset = left + ((width - lwidth) / 2);
+					yoffset = top + ((height - lheight) / 2);
+					<font color="#00FF00">//draw whatever it is</font>
+					<font color="#4699CD">if</font>( (lod-&gt;flags &amp; BF_TEXT) )
+					{
+						SetFont( rp, dri-&gt;dri_Font );
+						SetAPen( rp, (GA(o)-&gt;Flags &amp; GFLG_SELECTED) ? dri-&gt;dri_Pens[HIGHLIGHTTEXTPEN] : dri-&gt;dri_Pens[TEXTPEN] );
+						Move( rp, xoffset, yoffset + dri-&gt;dri_Font-&gt;tf_Baseline );
+						Text( rp, (STRPTR)GA(o)-&gt;GadgetText, strlen( (char *)GA(o)-&gt;GadgetText ) );
+					}
+					<font color="#4699CD">else</font>
+					{
+						DrawImageState( rp, GA(o)-&gt;GadgetRender, xoffset, yoffset, (GA(o)-&gt;Flags &amp; GFLG_SELECTED) ? IDS_SELECTED : IDS_NORMAL, GPR(msg)-&gt;gpr_GInfo-&gt;gi_DrInfo );
+					}
+				}
+				<font color="#00FF00">//check if we're disabled and draw a ghosting pattern if we are</font>
+				<font color="#4699CD">if</font>( GA(o)-&gt;Flags &amp; GFLG_DISABLED	)
+				{
+					SetAPen( rp, GPI(msg)-&gt;gpi_GInfo-&gt;gi_DrInfo-&gt;dri_Pens[SHADOWPEN] );
+					SetAfPt( rp, ghostdata, 1 );
+					RectFill( rp, left, top, left + width - 1, top + height - 1 );
+				}
+			}
+			<font color="#4699CD">break</font>;
+</pre>
+GM_LAYOUT is an OS 3.x only function but if it is here it won't hurt. Here we use it
+to automatically resize the framing image, although you can use it for a number of
+other things. Remember though that you shouldn't do any drawing here since Intuition
+will call GM_RENDER later, this is just setup so you can do recomputing.
+
+<pre>
+		<font color="#4699CD">case</font> GM_LAYOUT:
+			{
+				WORD width = (GA(o)-&gt;Flags &amp; GFLG_RELWIDTH) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Width + GA(o)-&gt;Width : GA(o)-&gt;Width;
+				WORD height = (GA(o)-&gt;Flags &amp; GFLG_RELHEIGHT) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Height + GA(o)-&gt;Height : GA(o)-&gt;Height;
+
+				lod = INST_DATA( cl, o );
+
+				<font color="#4699CD">if</font>( GA(o)-&gt;GadgetRender )
+				{
+					SetAttrs( GA(o)-&gt;GadgetRender,
+								IA_Width, width,
+								IA_Height, height,
+								TAG_DONE );
+				}
+			}
+			<font color="#4699CD">break</font>;
+</pre>
+GM_HITTEST is here so that you can tell Intuition whether the gadget was hit or not
+and then respond accordingly. Here we just respond that we were in fact hit and
+we should be activated since it is a square gadget. Although this method can
+be used so that it check something <font color="#4699CD">else</font> to see if it was hit or not (ie. call
+IM_HITTEST on a BOOPSI image object).
+
+<pre>
+		<font color="#4699CD">case</font> GM_HITTEST:
+			retval = GMR_GADGETHIT;
+			<font color="#4699CD">break</font>;
+</pre>
+GM_GOACTIVE is here so that you can set things up and do any long time operations
+before the gadget starts to receive all of the input.device messages. This function
+has a special <font color="#4699CD">return</font> value which tells intuition what it should do with the
+input event which caused us to go active. They are GMR_NOREUSE which tells Intuition
+to just kill the event, GMR_REUSE which means it should use the event again (ie.
+if there was a right mouse button event we would want the menu to show up instead
+of just trashing it, this can only happen in GM_HANDLEINPUT though), GMR_NEXTACTIVE
+which is just like pressing tab when a string gadget is selected, GMR_PREVACTIVE
+which is just like pressing shift tab when a string gadget is selected, and GMR_MEACTIVE
+which tells Intuition that we are active and want to stay that way. Note that below
+I should've checked to see if an input event activated us or if it was ActivateGadget(),
+this should be fixed.
+
+<pre>
+		<font color="#4699CD">case</font> GM_GOACTIVE:
+			{
+				<font color="#4699CD">struct</font> RastPort *rp;
+
+				lod = INST_DATA( cl, o );
+
+				<font color="#00FF00">//check if we're a push in button and act appropriately</font>
+				<font color="#4699CD">if</font>( lod-&gt;flags &amp; BF_PUSH )
+					GA(o)-&gt;Flags ^= GFLG_SELECTED;
+				<font color="#4699CD">else</font>
+					GA(o)-&gt;Flags |= GFLG_SELECTED;
+				<font color="#00FF00">//Always, always, always use ObtainGIRPort to get the RastPort,</font>
+				<font color="#00FF00">//unless of course its a GM_RENDER msg</font>
+				<font color="#4699CD">if</font>( rp = ObtainGIRPort( GPI(msg)-&gt;gpi_GInfo ) )
+				{
+					DoMethod( o, GM_RENDER, GPI(msg)-&gt;gpi_GInfo, rp, GREDRAW_REDRAW );
+					ReleaseGIRPort( rp );
+				}
+				<font color="#00FF00">//If its a push in button there is no need to go into GM_HANDLEINPUT</font>
+				<font color="#00FF00">//so we just <font color="#4699CD">return</font> GMR_NOREUSE.</font>
+				<font color="#4699CD">if</font>( lod-&gt;flags &amp; BF_PUSH )
+					retval = GMR_NOREUSE;
+				<font color="#4699CD">else</font>
+					retval = GMR_MEACTIVE;
+			}
+			<font color="#4699CD">break</font>;
+</pre>
+GM_HANDLEINPUT is where the gadget does all the processing of the input events. Here
+its pretty simple since we just need to catch timer events and send messages on those
+and check to make sure the mouse is actually over the gadget.
+
+<pre>
+		<font color="#4699CD">case</font> GM_HANDLEINPUT:
+			{
+				<font color="#4699CD">struct</font> RastPort *rp;
+				WORD x = GPI(msg)-&gt;gpi_Mouse.X;  <font color="#00FF00">//these are relative to the upper left corner of the gadget</font>
+				WORD y = GPI(msg)-&gt;gpi_Mouse.Y;
+				<font color="#4699CD">struct</font> InputEvent *ie = GPI(msg)-&gt;gpi_IEvent;
+				BOOL sel = FALSE;
+				WORD left = (GA(o)-&gt;Flags &amp; GFLG_RELRIGHT) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Width + GA(o)-&gt;LeftEdge - 1 : GA(o)-&gt;LeftEdge;
+				WORD top = (GA(o)-&gt;Flags &amp; GFLG_RELBOTTOM) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Height + GA(o)-&gt;TopEdge - 1 : GA(o)-&gt;TopEdge;
+				WORD width = (GA(o)-&gt;Flags &amp; GFLG_RELWIDTH) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Width + GA(o)-&gt;Width : GA(o)-&gt;Width;
+				WORD height = (GA(o)-&gt;Flags &amp; GFLG_RELHEIGHT) ? GPR(msg)-&gt;gpr_GInfo-&gt;gi_Domain.Height + GA(o)-&gt;Height : GA(o)-&gt;Height;
+
+				lod = INST_DATA( cl, o );
+
+				<font color="#00FF00">//check to see if the mouse is over the gadget</font>
+				<font color="#4699CD">if</font>( (x &gt;= 0) &amp;&amp; (x &lt; (width)) &amp;&amp;
+					(y &gt;= 0) &amp;&amp; (y &lt; (height)) )
+				{
+					sel = TRUE;
+				}
+				<font color="#00FF00">//on timer events we should send messages to our ICA_TARGET</font>
+				<font color="#00FF00">//Notice they are OPUF_INTERIM since the user isn't done with us yet</font>
+				<font color="#4699CD">if</font>( ie-&gt;ie_Class == IECLASS_TIMER )
+				{
+					Notify( cl, o, msg, OPUF_INTERIM, sel, GPI(msg)-&gt;gpi_GInfo );
+				}
+				<font color="#00FF00">//this takes care of mouse events</font>
+				<font color="#4699CD">if</font>( ie-&gt;ie_Class == IECLASS_RAWMOUSE )
+				{
+					<font color="#4699CD">switch</font>( ie-&gt;ie_Code )
+					{
+						<font color="#4699CD">case</font> SELECTUP:
+							<font color="#00FF00">//user let up the select button we need to deactivate</font>
+							retval = GMR_NOREUSE;
+							<font color="#00FF00">//if we are selected we need to tell intuition to send a IDCMP_RELVERIFY</font>
+							<font color="#4699CD">if</font>( GA(o)-&gt;Flags &amp; GFLG_SELECTED )
+								retval |= GMR_VERIFY;
+							<font color="#00FF00">//send a final notify, (ie. no OPUF_INTERIM flag)</font>
+							Notify( cl, o, msg, 0, sel, GPI(msg)-&gt;gpi_GInfo );
+							<font color="#00FF00">//Set the code field of the IntuiMessage to our GadgetID</font>
+							(*GPI(msg)-&gt;gpi_Termination) = GA(o)-&gt;GadgetID;
+							<font color="#4699CD">break</font>;
+						<font color="#4699CD">case</font> MENUDOWN:
+							<font color="#00FF00">//this is where GMR_REUSE come into play mainly</font>
+							retval = GMR_REUSE;
+							<font color="#4699CD">break</font>;
+						<font color="#4699CD">default</font>:
+							<font color="#00FF00">//check if we need to change the graphics of the gadget if</font>
+							<font color="#00FF00">//the mouse is/isn't over the gadget</font>
+							<font color="#4699CD">if</font>( (!sel &amp;&amp; (GA(o)-&gt;Flags &amp; GFLG_SELECTED)) ||
+								(sel &amp;&amp; !(GA(o)-&gt;Flags &amp; GFLG_SELECTED)) )
+							{
+								GA(o)-&gt;Flags ^= GFLG_SELECTED;
+								<font color="#4699CD">if</font>( rp = ObtainGIRPort( GPI(msg)-&gt;gpi_GInfo ) )
+								{
+									DoMethod( o, GM_RENDER, GPI(msg)-&gt;gpi_GInfo, rp, GREDRAW_REDRAW );
+									ReleaseGIRPort( rp );
+								}
+							}
+							<font color="#4699CD">break</font>;
+					}
+				}
+			}
+			<font color="#4699CD">break</font>;
+</pre>
+GM_GOINACTIVE is where we cleanup after GM_GOACTIVE and GM_HANDLEINPUT. I do the
+final render here since the gadget could've been inactivated by a select up or
+a mouse down, so we would've had to write this code for both in GM_HANDLEINPUT.
+
+<pre>
+		<font color="#4699CD">case</font> GM_GOINACTIVE:
+			{
+				<font color="#4699CD">struct</font> RastPort *rp;
+
+				lod = INST_DATA( cl, o );
+
+				<font color="#4699CD">if</font>( !(lod-&gt;flags &amp; BF_PUSH) )
+				{
+					GA(o)-&gt;Flags &amp;= ~GFLG_SELECTED;
+					<font color="#4699CD">if</font>( rp = ObtainGIRPort( GPI(msg)-&gt;gpi_GInfo ) )
+					{
+						DoMethod( o, GM_RENDER, GPI(msg)-&gt;gpi_GInfo, rp, GREDRAW_REDRAW );
+						ReleaseGIRPort( rp );
+					}
+				}
+			}
+			<font color="#4699CD">break</font>;
+</pre>
+Finally, if we don't know what the method is we just pass it up to the parent classes.
+
+<pre>
+		<font color="#4699CD">default</font>:
+			retval = DSM(cl, o, msg);
+			<font color="#4699CD">break</font>;
+	}
+	<font color="#4699CD">return</font>(retval);
+}
+</pre>
+<h3>SetAttrs()... Doesn't get any better here</h3>
+The SetClassAttr() function provided in the skeleton class is provided to make it
+easy to process all of the silly tags. Again notice, no __saveds in the function,
+although I think it should work with it since its always being called by the
+dispatcher, but who knows.
+
+<pre>
+ULONG
+ASM setClassAttrs( REG(a0) Class * cl, REG(a2) Object * o, REG(a1) <font color="#4699CD">struct</font> opSet * msg )
+{
+	<font color="#4699CD">struct</font> localObjData *lod = INST_DATA(cl, o);
+	<font color="#4699CD">struct</font> TagItem *tags = msg-&gt;ops_AttrList;
+	<font color="#4699CD">struct</font> TagItem *tstate;
+	<font color="#4699CD">struct</font> TagItem *tag;
+	ULONG           tidata;
+	BOOL change = FALSE;
+	BOOL sizechange = FALSE;
+
+	putreg( REG_A6, cl-&gt;cl_UserData );
+	geta4();
+
+	<font color="#00FF00">/* process rest */</font>
+	tstate = tags;
+	while (tag = NextTagItem(&amp;tstate))
+	{
+		tidata = tag-&gt;ti_Data;
+		<font color="#4699CD">switch</font> (tag-&gt;ti_Tag)
+		{
+			<font color="#00FF00">//This is a special attribute to tell make the gadget just</font>
+			<font color="#00FF00">//show the image instead of trying to try the frame</font>
+			<font color="#4699CD">case</font> BGA_Image:
+				GA(o)-&gt;GadgetRender = tidata;
+				GA(o)-&gt;Width = IM(tidata)-&gt;Width;
+				GA(o)-&gt;Height = IM(tidata)-&gt;Height;
+				<font color="#4699CD">break</font>;
+			<font color="#00FF00">//A text label is wanted, set flags and set change flag</font>
+			<font color="#4699CD">case</font> GA_Text:
+				lod-&gt;flags |= BF_TEXT;
+				change = TRUE;
+				<font color="#4699CD">break</font>;
+			<font color="#00FF00">//An image for the label is wanted, clear flag and set change flag</font>
+			<font color="#4699CD">case</font> GA_LabelImage:
+				lod-&gt;flags &amp;= ~BF_TEXT;
+				change = TRUE;
+				<font color="#4699CD">break</font>;
+			<font color="#4699CD">case</font> GA_DrawInfo:
+				lod-&gt;dri = (<font color="#4699CD">struct</font> DrawInfo *)tidata;
+				<font color="#4699CD">break</font>;
+			<font color="#00FF00">//programmatic size change, do a redraw</font>
+			<font color="#4699CD">case</font> GA_Width:
+			<font color="#4699CD">case</font> GA_Height:
+				sizechange = TRUE;
+				<font color="#4699CD">break</font>;
+			<font color="#00FF00">//flag thingies, should prolly use one of the utility.library functions.</font>
+			<font color="#4699CD">case</font> BGA_Push:
+				<font color="#4699CD">if</font>( tidata )
+					lod-&gt;flags |= BF_PUSH;
+				<font color="#4699CD">else</font>
+					lod-&gt;flags &amp;= ~BF_PUSH;
+				<font color="#4699CD">break</font>;
+			<font color="#00FF00">//dunno what it is</font>
+			<font color="#4699CD">default</font>:
+				<font color="#4699CD">break</font>;
+		}
+	}
+	<font color="#00FF00">//Check for size change, change the frame's rectangle, should prolly do a GM_RENDER here, oops</font>
+	<font color="#4699CD">if</font>( sizechange )
+	{
+		<font color="#4699CD">if</font>( GA(o)-&gt;GadgetRender )
+		{
+			SetAttrs( GA(o)-&gt;GadgetRender,
+						IA_Width, GA(o)-&gt;Width,
+						IA_Height, GA(o)-&gt;Height,
+						TAG_DONE );
+		}
+	}
+	<font color="#00FF00">//Theres some new text gotta adjust the size.  There should be some flags here</font>
+	<font color="#00FF00">//so that the programmer can stop the resize from occurring</font>
+	<font color="#4699CD">if</font>( change &amp;&amp; GA(o)-&gt;GadgetText )
+	{
+		<font color="#4699CD">struct</font> IBox cont, frame;
+		WORD width, height;
+
+		<font color="#00FF00">//check for text/image label and find the size</font>
+		<font color="#4699CD">if</font>( (lod-&gt;flags &amp; BF_TEXT) )
+		{
+			<font color="#4699CD">struct</font> DrawInfo *dri = lod-&gt;dri;
+
+			width = myTextLength( dri-&gt;dri_Font, (char *)GA(o)-&gt;GadgetText, strlen( (char *)GA(o)-&gt;GadgetText ) );
+			height = dri-&gt;dri_Font-&gt;tf_YSize;
+		}
+		<font color="#4699CD">else</font>
+		{
+			width = IA(GA(o)-&gt;GadgetText)-&gt;Width;
+			height = IA(GA(o)-&gt;GadgetText)-&gt;Height;
+		}
+		<font color="#00FF00">//try and do an IM_FRAMEBOX to figure out how big the frame wants to be for this size graphic</font>
+		cont.Width = width;
+		cont.Height = height;
+		<font color="#4699CD">if</font>( GA(o)-&gt;GadgetRender )
+		{
+			frame.Left = 0;
+			frame.Top = 0;
+			frame.Width = width;
+			frame.Height = height;
+			DoMethod( GA(o)-&gt;GadgetRender, IM_FRAMEBOX, &amp;frame, &amp;cont, lod-&gt;dri, 0 );
+		}
+		<font color="#00FF00">//GREL_ flags should be check above</font>
+		<font color="#4699CD">if</font>( !(GA(o)-&gt;Flags &amp; GFLG_RELWIDTH) )
+			GA(o)-&gt;Width = cont.Width;
+		<font color="#4699CD">if</font>( !(GA(o)-&gt;Flags &amp; GFLG_RELHEIGHT) )
+			GA(o)-&gt;Height = cont.Height;
+		<font color="#00FF00">//Adjust the frame size, dunno if we wanna redraw here or not since the</font>
+		<font color="#00FF00">//programmer might want to manually do it so a redraw would be ugly</font>
+		<font color="#4699CD">if</font>( GA(o)-&gt;GadgetRender )
+		{
+			SetAttrs( GA(o)-&gt;GadgetRender,
+								IA_Width, cont.Width,
+								IA_Height, cont.Height,
+								TAG_DONE );
+		}
+	}
+	<font color="#4699CD">return</font> (1L);
+}
+</pre>
+<h3>GetClassAtr... Just pure fat.</h3>
+This is currently of no use to us here, no reason to take it out though.
+
+<pre>
+ULONG
+ASM getClassAttr( REG(a0) Class *cl, REG(a2) Object *o, REG(a1) <font color="#4699CD">struct</font> opGet * msg )
+{
+	<font color="#4699CD">struct</font> localObjData *lod = INST_DATA(cl, o);
+
+	putreg( REG_A6, cl-&gt;cl_UserData );
+	geta4();
+
+	<font color="#4699CD">switch</font> (msg-&gt;opg_AttrID)
+	{
+		<font color="#4699CD">default</font>:
+			<font color="#4699CD">return</font> ((ULONG) DSM(cl, o, (Msg)msg));
+	}
+	<font color="#4699CD">return</font> (1L);
+}
+</pre>
+<h3>myTextLength... Ooooh Baaaad...</h3>
+This is prolly bad but I hate having to make a RastPort just to get a text length.
+
+<pre>
+LONG myTextLength( <font color="#4699CD">struct</font> TextFont *font, char *str, int len )
+{
+	int lpc;
+	LONG width = 0;
+	int currch;
+
+	<font color="#4699CD">if</font>( font-&gt;tf_Flags &amp; FPF_PROPORTIONAL )
+	{
+		<font color="#4699CD">for</font>( lpc = 0; lpc &lt; len; lpc++ )
+		{
+			currch = str[lpc] - font-&gt;tf_LoChar;
+			width += ((WORD *)font-&gt;tf_CharSpace)[currch] + ((WORD *)font-&gt;tf_CharKern[currch]);
+		}
+	}
+	<font color="#4699CD">else</font>
+	{
+		width = font-&gt;tf_XSize * len;
+	}
+	<font color="#4699CD">return</font>( width );
+}
+</pre>
+<h3>Notify... Easy to do but hard in concept</h3>
+The OM_NOTIFY/OM_UPDATE connection is something I will never understand. Anyways
+we need to send an OM_UPDATE to our target with our GA_ID as the attribute. The
+ti_Data of this attribute reflects whether the mouse is over the button or not.
+
+<pre>
+void ASM Notify( REG(a0) Class *cl, REG(a2) Object *o, REG(a1) <font color="#4699CD">struct</font> opSet *msg, REG(d1) ULONG flags, REG(d2) sel, REG(a3) <font color="#4699CD">struct</font> GadgetInfo *ginfo )
+{
+	<font color="#4699CD">struct</font> TagItem tt[2];
+	<font color="#4699CD">struct</font> localObjData *lod = INST_DATA(cl, o);
+
+	putreg( REG_A6, cl-&gt;cl_UserData );
+	geta4();
+
+	tt[0].ti_Tag = GA_ID;
+	tt[0].ti_Data = sel ? GA(o)-&gt;GadgetID : -GA(o)-&gt;GadgetID;
+
+	tt[1].ti_Tag = TAG_DONE;
+
+	DoSuperMethod( cl, o, OM_NOTIFY, tt, ginfo, flags );
+}
+</pre>
+<HR>
+Maintained by <i><a href="mailto:stack@eng.utah.edu">Tim Stack(stack@eng.utah.edu)</a></i>
+<br>
+Last Changed on 27-Dec-1997, 10:12
+</body>
+</html>
