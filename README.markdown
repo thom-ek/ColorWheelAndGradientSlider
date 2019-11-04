@@ -1,4 +1,4 @@
-Colorwheel.gadget and GradienSlider.gadget replacement for RTG on Amiga OS.
+ColorWheel.gadget and GradientSlider.gadget replacement for RTG on Amiga OS.
 
 Copyright
 ---------
